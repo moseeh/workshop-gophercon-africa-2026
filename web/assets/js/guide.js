@@ -78,6 +78,22 @@ document.addEventListener('keydown', function (e) {
 	if (e.key === 'Escape') shut();
 });
 
+// The legend starts folded where there's no room beside the globe, and
+// remembers whether the visitor folded or unfolded it last time.
+const cartouche = document.getElementById('cartouche');
+if (cartouche) {
+	let saved = null;
+	try {
+		saved = localStorage.getItem('atlas:legend');
+	} catch {}
+	cartouche.open = saved ? saved === 'open' : window.matchMedia('(min-width: 1100px)').matches;
+	cartouche.addEventListener('toggle', function () {
+		try {
+			localStorage.setItem('atlas:legend', cartouche.open ? 'open' : 'folded');
+		} catch {}
+	});
+}
+
 document.querySelectorAll('.logbook__go').forEach(function (btn) {
 	btn.addEventListener('click', function () {
 		const id = btn.dataset.sighting;

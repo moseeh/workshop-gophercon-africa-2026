@@ -208,6 +208,203 @@ a {
 	font-variant-numeric: tabular-nums;
 }
 
+/* The cartouche: the framed legend old maps keep in a corner. */
+.cartouche {
+	position: absolute;
+	z-index: 7;
+	top: 150px;
+	left: var(--gutter);
+	width: 270px;
+	max-height: calc(100% - 300px);
+	overflow-y: auto;
+	color: var(--ink);
+	transition: opacity 0.6s;
+}
+
+.cartouche[open] {
+	padding: 22px 20px 18px;
+	background:
+		radial-gradient(ellipse at 15% 0%, rgba(255, 255, 255, 0.4), transparent 55%),
+		var(--parchment);
+	border: 1px solid var(--brass);
+	outline: 1px solid rgba(176, 141, 87, 0.6);
+	outline-offset: -6px;
+	border-radius: 3px;
+	box-shadow: var(--shadow-page);
+}
+
+.voyage--playing .cartouche[open] {
+	opacity: 0.2;
+}
+
+.voyage--playing .cartouche[open]:hover,
+.voyage--playing .cartouche[open]:focus-within {
+	opacity: 1;
+}
+
+.cartouche__toggle {
+	list-style: none;
+	cursor: pointer;
+}
+
+.cartouche__toggle::-webkit-details-marker {
+	display: none;
+}
+
+.cartouche[open] .cartouche__toggle {
+	position: absolute;
+	top: 8px;
+	right: 12px;
+	font: 1.1rem / 1 var(--font-hand);
+	color: var(--sepia);
+}
+
+.cartouche[open] .cartouche__unfold,
+.cartouche:not([open]) .cartouche__fold {
+	display: none;
+}
+
+.cartouche:not([open]) .cartouche__toggle {
+	display: inline-block;
+	padding: 8px 14px;
+	background: rgba(27, 19, 12, 0.7);
+	border: 1px solid var(--brass);
+	border-radius: 999px;
+	font: italic 1.05rem / 1 var(--font-title);
+	color: var(--brass-light);
+}
+
+.cartouche :focus-visible {
+	outline-color: var(--red-ink);
+}
+
+.cartouche__title {
+	margin: 6px 0 0;
+	font: 400 1.55rem / 1.1 var(--font-title);
+	text-align: center;
+}
+
+.cartouche__years {
+	margin: 2px 0 12px;
+	font: italic 1rem / 1.2 var(--font-title);
+	color: var(--sepia);
+	text-align: center;
+}
+
+.cartouche__how {
+	display: grid;
+	gap: 6px;
+	margin: 0;
+	padding: 12px 0 0;
+	border-top: 1px solid rgba(122, 82, 48, 0.4);
+	list-style: none;
+	font-size: 0.8rem;
+	line-height: 1.45;
+}
+
+.cartouche__how strong {
+	font: 1.15rem / 1 var(--font-hand);
+	color: var(--red-ink);
+}
+
+.cartouche__rule {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	margin: 14px 0 8px;
+	font: italic 1rem / 1 var(--font-title);
+	color: var(--sepia);
+}
+
+.cartouche__rule::before,
+.cartouche__rule::after {
+	content: "";
+	flex: 1;
+	border-top: 1px solid rgba(122, 82, 48, 0.4);
+}
+
+.cartouche__legend {
+	display: grid;
+	grid-template-columns: 1fr 1fr;
+	gap: 6px 10px;
+	margin: 0;
+	padding: 0;
+	list-style: none;
+	font-size: 0.78rem;
+}
+
+.cartouche__legend li {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+}
+
+.cartouche__legend svg {
+	flex: none;
+	width: 26px;
+	height: 26px;
+	fill: none;
+	stroke-linecap: round;
+	stroke-linejoin: round;
+}
+
+.lg-tack {
+	fill: var(--red-ink);
+	stroke: var(--ink);
+	stroke-width: 2;
+}
+
+.lg-wash {
+	fill: rgba(122, 82, 48, 0.28);
+	stroke: rgba(122, 82, 48, 0.45);
+	stroke-width: 1.5;
+}
+
+.lg-sun {
+	fill: #fbf6ea;
+	stroke: var(--ink);
+	stroke-width: 2;
+}
+
+.lg-line {
+	stroke: var(--ink);
+	stroke-width: 2;
+}
+
+.lg-snow {
+	fill: #fffaf0;
+	stroke: var(--ink);
+	stroke-width: 1;
+}
+
+.lg-bolt {
+	stroke: var(--red-ink);
+	stroke-width: 3;
+}
+
+.cartouche__note {
+	margin: 12px 0 0;
+	font: 1.05rem / 1.2 var(--font-hand);
+	color: var(--sepia);
+}
+
+/* A gentle pulse on the seal until the visitor plays or grabs the globe. */
+.seal--nudge {
+	animation: nudge 1.8s ease-out 1.2s 5;
+}
+
+@keyframes nudge {
+	0% {
+		box-shadow: 0 0 0 4px rgba(158, 43, 37, 0.35), 0 4px 10px rgba(0, 0, 0, 0.5), inset 0 -3px 6px rgba(0, 0, 0, 0.35);
+	}
+	60% {
+		box-shadow: 0 0 0 18px rgba(158, 43, 37, 0), 0 4px 10px rgba(0, 0, 0, 0.5), inset 0 -3px 6px rgba(0, 0, 0, 0.35);
+	}
+	100% {
+		box-shadow: 0 0 0 4px rgba(158, 43, 37, 0.35), 0 4px 10px rgba(0, 0, 0, 0.5), inset 0 -3px 6px rgba(0, 0, 0, 0.35);
+	}
+}
+
 .voyage__hint {
 	position: absolute;
 	z-index: 5;
@@ -223,7 +420,8 @@ a {
 	transition: opacity 0.6s;
 }
 
-.voyage--playing .voyage__hint {
+.voyage--playing .voyage__hint,
+.cartouche[open] ~ .voyage__hint {
 	opacity: 0;
 }
 
@@ -769,6 +967,15 @@ a {
 	.voyage__hint {
 		bottom: 196px;
 		font-size: 1.15rem;
+	}
+
+	.cartouche {
+		top: 132px;
+		max-height: calc(100% - 340px);
+	}
+
+	.cartouche[open] {
+		width: calc(100% - 2 * var(--gutter));
 	}
 
 	.voyage__deck {

@@ -209,6 +209,7 @@ mount('globe', function ({ THREE, scene, camera, renderer, canvas, colour, still
 	let idleTimer = 0;
 	let guideOpen = false;
 	controls.addEventListener('start', function () {
+		$('voyage-play')?.classList.remove('seal--nudge');
 		controls.autoRotate = false;
 		tween = null;
 		clearTimeout(idleTimer);
@@ -409,6 +410,7 @@ mount('globe', function ({ THREE, scene, camera, renderer, canvas, colour, still
 	function start() {
 		if (!n || still) return;
 		if (mode === 'explore' || cur >= tEnd) seek(tStart);
+		play.classList.remove('seal--nudge');
 		mode = 'playing';
 		section.classList.add('voyage--playing');
 		play.setAttribute('aria-label', 'Pause the voyage');

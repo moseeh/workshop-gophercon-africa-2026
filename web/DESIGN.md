@@ -43,6 +43,10 @@ Logbook (every sighting as a ledger row) below it. "Field Atlas" is a working na
   when a pin is opened, so no photo loads until then. iNaturalist photos use `medium`, not
   `original`. Photo with paper corners, remarks in handwriting only when present, weather block,
   recorded by, link to the original record. A side page on desktop, a bottom sheet on phones.
+- **Cartouche** (left side): a parchment `<details>` legend with brass double rule, how-to lines
+  and inked weather symbols matching the globe's washes. Open on wide screens, folded to a
+  "❦ Legend" pill below 1100px, and the visitor's choice is remembered in `localStorage`. It fades
+  while the voyage plays. The wax seal pulses five times until the visitor plays or drags.
 - **Logbook**: a ruled parchment page and a table, stacked cards on phones. "Show on globe" flies to
   the pin and opens its page.
 
