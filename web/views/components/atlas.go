@@ -7,6 +7,7 @@ import (
 	"path"
 	"slices"
 	"strings"
+	"unicode/utf8"
 
 	"workshop/internal/domain/sighting"
 )
@@ -22,6 +23,13 @@ type Pin struct {
 	Sky     string  `json:"w"`
 	Species string  `json:"s"`
 	Country string  `json:"c"`
+	Group   string  `json:"g"`
+	// The where of a sighting, for search: its continent, country and region.
+	Continent   string `json:"ct,omitempty"`
+	CountryName string `json:"cn,omitempty"`
+	Region      string `json:"rg,omitempty"`
+	// Note is the start of the observer's remarks, empty when they left none.
+	Note string `json:"r,omitempty"`
 }
 
 // Pins turns sightings into globe pins, oldest first, the order the voyage plays them in.
@@ -38,10 +46,26 @@ func Pins(sightings []sighting.Sighting) []Pin {
 			Sky:     Sky(s),
 			Species: cmp.Or(s.Species.ScientificName, DisplayName(s)),
 			Country: s.Location.CountryCode.String(),
+			Group:   s.Species.Group().String(),
+
+			Continent:   s.Location.CountryCode.Continent().String(),
+			CountryName: s.Location.Country,
+			Region:      s.Location.StateProvince,
+			Note:        notePreview(s.Remarks),
 		})
 	}
 	slices.SortStableFunc(pins, func(a, b Pin) int { return cmp.Compare(a.T, b.T) })
 	return pins
+}
+
+// notePreview cuts remarks to a line or two for lists; the field guide shows them whole.
+func notePreview(remarks string) string {
+	remarks = strings.Join(strings.Fields(remarks), " ")
+	if utf8.RuneCountInString(remarks) <= 140 {
+		return remarks
+	}
+	r := []rune(remarks)[:140]
+	return strings.TrimRight(string(r), " ,.;:") + "…"
 }
 
 // DisplayName prefers the name a reader would recognise, falling back through the taxonomy.

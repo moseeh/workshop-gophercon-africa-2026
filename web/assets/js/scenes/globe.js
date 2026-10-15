@@ -1,19 +1,19 @@
-// The antique globe: an inked map on a sphere, a pin per sighting, and the
+// The antique globe: an inked map on a sphere, a tack per sighting, and the
 // voyage that plays them back in the order they were seen, each arriving
-// with the weather it was seen in.
+// with the weather it was seen in. Crowded tacks gather under numbered seals.
 
 import { mount } from '/assets/js/threejs.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { geoEquirectangular, geoPath, geoGraticule10 } from 'd3-geo';
 import { feature, mesh } from 'topojson-client';
+import { pins, byId, passes, emit, on, shortPlace, tally, plural, DAY } from '/assets/js/atlas.js';
 
 const WORLD = 'https://cdn.jsdelivr.net/npm/world-atlas@2.0.2/countries-110m.json';
-const DAY = 86400;
 const D2R = Math.PI / 180;
 const FOV_HALF = 25 * D2R;
 const HOME = { lat: -1.29, lng: 36.82 }; // Nairobi, where the voyage sets out from.
-
-const pins = readPins();
+const CLUSTER_PX = 26;
+const NEAREST = 1.06; // How close the camera may come: just above the paper.
 
 mount('globe', function ({ THREE, scene, camera, renderer, canvas, colour, still }) {
 	const ink = colour('--ink', '#3B2A1A');
@@ -36,7 +36,7 @@ mount('globe', function ({ THREE, scene, camera, renderer, canvas, colour, still
 	mapTexture.anisotropy = renderer.capabilities.getMaxAnisotropy();
 
 	const globe = new THREE.Mesh(
-		new THREE.SphereGeometry(1, 96, 64),
+		new THREE.SphereGeometry(1, 128, 96),
 		new THREE.MeshStandardMaterial({ color: sea, roughness: 0.92, metalness: 0 }),
 	);
 	scene.add(globe);
@@ -46,6 +46,8 @@ mount('globe', function ({ THREE, scene, camera, renderer, canvas, colour, still
 	lamp.position.set(-2.5, 2.5, 3);
 	camera.add(lamp);
 	scene.add(camera);
+	camera.near = 0.01;
+	camera.updateProjectionMatrix();
 
 	fetch(WORLD)
 		.then((r) => r.json())
@@ -66,21 +68,31 @@ mount('globe', function ({ THREE, scene, camera, renderer, canvas, colour, still
 	const shown = new Float32Array(n).fill(1);
 	const arrived = new Float32Array(n).fill(-100);
 	const hot = new Float32Array(n);
+	const dim = new Float32Array(n);
+	const clustered = new Float32Array(n);
+	const noted = Float32Array.from(pins, (p) => (p.r ? 1 : 0));
 	const dirs = pins.map((p) => toVec(THREE, p.lat, p.lng, 1));
-	dirs.forEach((d, i) => d.clone().multiplyScalar(1.006).toArray(positions, i * 3));
+	dirs.forEach((d, i) => d.clone().multiplyScalar(1.004).toArray(positions, i * 3));
 
 	const pinGeometry = new THREE.BufferGeometry();
 	pinGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-	pinGeometry.setAttribute('aShown', new THREE.BufferAttribute(shown, 1));
-	pinGeometry.setAttribute('aArrive', new THREE.BufferAttribute(arrived, 1));
-	pinGeometry.setAttribute('aHot', new THREE.BufferAttribute(hot, 1));
+	for (const [name, data] of [
+		['aShown', shown],
+		['aArrive', arrived],
+		['aHot', hot],
+		['aDim', dim],
+		['aClustered', clustered],
+		['aNote', noted],
+	]) {
+		pinGeometry.setAttribute(name, new THREE.BufferAttribute(data, 1));
+	}
 
 	const pinMaterial = new THREE.ShaderMaterial({
 		transparent: true,
 		depthWrite: false,
 		uniforms: {
 			uTime: { value: 0 },
-			uSize: { value: 30 * renderer.getPixelRatio() },
+			uSize: { value: 15 * renderer.getPixelRatio() },
 			uInk: { value: ink },
 			uBrass: { value: brass },
 			uRed: { value: red },
@@ -90,18 +102,27 @@ mount('globe', function ({ THREE, scene, camera, renderer, canvas, colour, still
 			attribute float aShown;
 			attribute float aArrive;
 			attribute float aHot;
+			attribute float aDim;
+			attribute float aClustered;
+			attribute float aNote;
 			uniform float uTime;
 			uniform float uSize;
 			varying float vPulse;
 			varying float vHot;
+			varying float vDim;
+			varying float vNote;
 			void main() {
 				vec4 mv = modelViewMatrix * vec4(position, 1.0);
 				gl_Position = projectionMatrix * mv;
 				float age = uTime - aArrive;
 				vPulse = clamp(1.0 - age / 1.8, 0.0, 1.0);
 				vHot = aHot;
+				vDim = aDim;
+				vNote = aNote;
+				// A fixed size on screen, so coming closer spreads crowded tacks apart.
 				float grow = 1.0 + 2.4 * vPulse + 1.2 * aHot;
-				gl_PointSize = aShown > 0.5 ? uSize * grow / -mv.z : 0.0;
+				float size = uSize * grow * (1.0 - 0.3 * aDim);
+				gl_PointSize = (aShown > 0.5 && aClustered < 0.5) ? size : 0.0;
 			}
 		`,
 		fragmentShader: /* glsl */ `
@@ -111,24 +132,28 @@ mount('globe', function ({ THREE, scene, camera, renderer, canvas, colour, still
 			uniform vec3 uPaper;
 			varying float vPulse;
 			varying float vHot;
+			varying float vDim;
+			varying float vNote;
 			void main() {
 				vec2 p = gl_PointCoord - 0.5;
 				float d = length(p) * 2.0;
 				if (d > 1.0) discard;
 				float grow = 1.0 + 2.4 * vPulse + 1.2 * vHot;
 				float core = d * grow;
+				float fade = 1.0 - 0.72 * vDim;
 				if (core <= 1.0) {
-					// A map tack: red-ink head, an inked rim, a glint of paper.
-					vec3 c = mix(uRed, uInk, smoothstep(0.55, 0.8, core));
-					c = mix(c, uBrass, smoothstep(0.8, 0.95, core));
+					// A map tack: red-ink head and an inked rim, gilded when the observer left a note.
+					float rimStart = mix(0.8, 0.62, vNote);
+					vec3 c = mix(uRed, uInk, smoothstep(0.55, 0.8, core) * (1.0 - vNote));
+					c = mix(c, mix(uBrass, vec3(0.93, 0.78, 0.42), vNote), smoothstep(rimStart, rimStart + 0.12, core));
 					float glint = smoothstep(0.45, 0.0, length(p * grow - vec2(-0.12, 0.12)) * 2.0);
 					c = mix(c, uPaper, glint * 0.55);
-					gl_FragColor = vec4(c, 1.0 - smoothstep(0.92, 1.0, core));
+					gl_FragColor = vec4(c, (1.0 - smoothstep(0.92, 1.0, core)) * fade);
 					return;
 				}
-				// The ripple of a new arrival, and the brass ring round a chosen pin.
+				// The ripple of a new arrival, and the brass ring round a chosen tack.
 				float ring = 1.0 - smoothstep(0.0, 0.09, abs(d - 0.9));
-				float a = ring * max(vPulse * 0.9, vHot);
+				float a = ring * max(vPulse * 0.9, vHot) * fade;
 				if (a < 0.01) discard;
 				gl_FragColor = vec4(mix(uRed, uBrass, vHot), a);
 			}
@@ -139,9 +164,10 @@ mount('globe', function ({ THREE, scene, camera, renderer, canvas, colour, still
 	scene.add(pinPoints);
 
 	function pinsChanged() {
-		pinGeometry.attributes.aShown.needsUpdate = true;
-		pinGeometry.attributes.aArrive.needsUpdate = true;
-		pinGeometry.attributes.aHot.needsUpdate = true;
+		for (const name of ['aShown', 'aArrive', 'aHot', 'aDim', 'aClustered']) {
+			pinGeometry.attributes[name].needsUpdate = true;
+		}
+		clustersDirty = true;
 	}
 
 	// ---- Weather, drawn in ink and watercolour ------------------------------
@@ -197,7 +223,7 @@ mount('globe', function ({ THREE, scene, camera, renderer, canvas, colour, still
 	controls.dampingFactor = 0.08;
 	controls.rotateSpeed = 0.5;
 	controls.zoomSpeed = 0.6;
-	controls.minDistance = 1.45;
+	controls.minDistance = NEAREST;
 	controls.maxDistance = 7;
 	controls.autoRotate = !still;
 	controls.autoRotateSpeed = 0.35;
@@ -221,13 +247,20 @@ mount('globe', function ({ THREE, scene, camera, renderer, canvas, colour, still
 	if (still) controls.addEventListener('change', render);
 
 	function resumeDrift() {
-		controls.autoRotate = !still && !guideOpen && !(mode === 'playing' && follow.checked);
+		controls.autoRotate = !still && !guideOpen && !focus && !(mode === 'playing' && follow.checked);
+	}
+
+	// Closer to the paper, a drag or a scroll moves less, so it stays steady.
+	function gearControls() {
+		const k = Math.min(Math.max((camera.position.length() - 1) / (baseDistance - 1), 0.04), 1);
+		controls.rotateSpeed = 0.5 * k;
+		controls.zoomSpeed = 0.25 + 0.35 * k;
 	}
 
 	let tween = null;
 	let lastTween = -10;
 	function flyTo(dir, distance, duration) {
-		const target = { dir: dir.clone().normalize(), dist: distance };
+		const target = { dir: dir.clone().normalize(), dist: Math.max(distance, NEAREST) };
 		if (still) {
 			camera.position.copy(target.dir).multiplyScalar(target.dist);
 			camera.lookAt(0, 0, 0);
@@ -256,6 +289,28 @@ mount('globe', function ({ THREE, scene, camera, renderer, canvas, colour, still
 		if (k >= 1) tween = null;
 	}
 
+	// Flies to frame a set of tacks: close for a town, wide for a continent.
+	function frame(indices) {
+		if (!indices.length) return;
+		const centre = new THREE.Vector3();
+		for (const i of indices) centre.add(dirs[i]);
+		if (centre.lengthSq() < 1e-6) return flyTo(camera.position, baseDistance, 1.4);
+		centre.normalize();
+		let spread = 0;
+		for (const i of indices) spread = Math.max(spread, centre.angleTo(dirs[i]));
+		flyTo(centre, distanceFor(spread), 1.6);
+	}
+
+	function distanceFor(spread) {
+		if (spread > 1.3) return baseDistance;
+		const view = 0.62 * FOV_HALF * Math.min(1, stage.clientWidth / Math.max(stage.clientHeight, 1));
+		const d = Math.cos(spread) + Math.sin(Math.max(spread, 0.012)) / Math.tan(view);
+		// Phones stand further back: the panel covers half the screen and the paper
+		// coarsens up close.
+		const nearest = stage.clientWidth < 760 ? 1.9 : 1.4;
+		return Math.min(Math.max(d, nearest), baseDistance * 1.05);
+	}
+
 	// The brass ring hugs the globe whatever the zoom, so it follows the camera.
 	let ringR = 0;
 	function sizeRing() {
@@ -265,29 +320,186 @@ mount('globe', function ({ THREE, scene, camera, renderer, canvas, colour, still
 		if (Math.abs(r - ringR) > 0.5) {
 			ringR = r;
 			stage.style.setProperty('--globe-r', r.toFixed(1) + 'px');
+			stage.classList.toggle('is-close', r > Math.max(stage.clientWidth, h));
 		}
 	}
 
-	// ---- Picking pins -------------------------------------------------------
+	// ---- Where tacks are on screen ------------------------------------------
+
+	const projected = new THREE.Vector3();
+	function screenOf(i, rect) {
+		const cam = camera.position;
+		const d = dirs[i];
+		if (d.x * cam.x + d.y * cam.y + d.z * cam.z <= 1.004) return null;
+		projected.copy(d).multiplyScalar(1.004).project(camera);
+		if (projected.z > 1) return null;
+		return {
+			x: ((projected.x + 1) / 2) * rect.width,
+			y: ((1 - projected.y) / 2) * rect.height,
+		};
+	}
+
+	// ---- Clusters: crowded tacks gather under one numbered seal -------------
+
+	const clusterLayer = $('clusters');
+	const seals = [];
+	let clusters = [];
+	let clustersDirty = true;
+	const lastCam = new THREE.Vector3();
+
+	function gatherClusters() {
+		const moved = lastCam.distanceToSquared(camera.position) > 1e-9;
+		if (!moved && !clustersDirty) return;
+		lastCam.copy(camera.position);
+		clustersDirty = false;
+
+		const rect = { width: stage.clientWidth, height: stage.clientHeight };
+		const cells = new Map();
+		const groups = [];
+		const off = mode === 'playing';
+		let changed = false;
+
+		for (let i = 0; i < n; i++) {
+			const want = 0;
+			if (!off && shown[i] > 0.5 && dim[i] < 0.5 && i !== selected) {
+				const s = screenOf(i, rect);
+				if (s) {
+					const gx = Math.floor(s.x / CLUSTER_PX);
+					const gy = Math.floor(s.y / CLUSTER_PX);
+					let home = null;
+					for (let dx = -1; dx <= 1 && !home; dx++) {
+						for (let dy = -1; dy <= 1 && !home; dy++) {
+							for (const g of cells.get(gx + dx + ',' + (gy + dy)) || []) {
+								if ((g.ax - s.x) ** 2 + (g.ay - s.y) ** 2 < CLUSTER_PX * CLUSTER_PX) {
+									home = g;
+									break;
+								}
+							}
+						}
+					}
+					if (home) {
+						home.members.push(i);
+						home.x += s.x;
+						home.y += s.y;
+					} else {
+						const g = { ax: s.x, ay: s.y, x: s.x, y: s.y, members: [i] };
+						groups.push(g);
+						const key = gx + ',' + gy;
+						if (!cells.has(key)) cells.set(key, []);
+						cells.get(key).push(g);
+					}
+				}
+			}
+			if (clustered[i] !== want) {
+				clustered[i] = want;
+				changed = true;
+			}
+		}
+
+		// A seal is wider than the gathering distance, so seals that would still
+		// touch, or sit on a lone tack, are merged until they stand apart.
+		const SEAL_GAP = 36;
+		for (const g of groups) {
+			g.cx = g.x / g.members.length;
+			g.cy = g.y / g.members.length;
+		}
+		let merged = true;
+		while (merged) {
+			merged = false;
+			for (let a = 0; a < groups.length; a++) {
+				const A = groups[a];
+				for (let b = a + 1; b < groups.length; b++) {
+					const B = groups[b];
+					if (A.members.length < 2 && B.members.length < 2) continue;
+					if ((A.cx - B.cx) ** 2 + (A.cy - B.cy) ** 2 < SEAL_GAP * SEAL_GAP) {
+						A.members.push(...B.members);
+						A.x += B.x;
+						A.y += B.y;
+						A.cx = A.x / A.members.length;
+						A.cy = A.y / A.members.length;
+						groups.splice(b, 1);
+						b--;
+						merged = true;
+					}
+				}
+			}
+		}
+		clusters = groups.filter((g) => g.members.length > 1);
+		for (const g of clusters) {
+			for (const i of g.members) {
+				if (clustered[i] !== 1) {
+					clustered[i] = 1;
+					changed = true;
+				}
+			}
+		}
+		if (changed) pinGeometry.attributes.aClustered.needsUpdate = true;
+		placeSeals();
+	}
+
+	function placeSeals() {
+		if (!clusterLayer) return;
+		while (seals.length < clusters.length) {
+			const seal = document.createElement('button');
+			seal.type = 'button';
+			seal.className = 'cluster';
+			seal.addEventListener('click', () => openCluster(seal._cluster));
+			seal.addEventListener('mouseenter', () => showTip(seal._label, seal));
+			seal.addEventListener('mouseleave', () => (tip.hidden = true));
+			clusterLayer.appendChild(seal);
+			seals.push(seal);
+		}
+		seals.forEach(function (seal, k) {
+			const g = clusters[k];
+			if (!g) {
+				seal.hidden = true;
+				return;
+			}
+			const count = g.members.length;
+			const x = g.cx;
+			const y = g.cy;
+			seal._cluster = g;
+			seal._label = plural(count, 'sighting') + ' here';
+			seal.hidden = false;
+			seal.textContent = count;
+			seal.setAttribute('aria-label', plural(count, 'sighting') + ' close together. Open the list.');
+			seal.style.transform = `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px) translate(-50%, -50%)`;
+			seal.classList.toggle('cluster--big', count >= 10);
+		});
+	}
+
+	function openCluster(g) {
+		if (!g) return;
+		const ids = g.members.slice();
+		const where = tally(ids.map((i) => shortPlace(pins[i].p)))[0];
+		const title = where ? 'Around ' + where[0] : 'Sightings here';
+		tip.hidden = true;
+		if (mode === 'playing') pause();
+		guideOpen = true;
+		const centre = new THREE.Vector3();
+		for (const i of ids) centre.add(dirs[i]);
+		let spread = 0;
+		centre.normalize();
+		for (const i of ids) spread = Math.max(spread, centre.angleTo(dirs[i]));
+		flyTo(centre, Math.min(distanceFor(spread * 2.2), camera.position.length() * 0.75), 1.3);
+		emit('atlas:list', { kind: 'cluster', title, ids: ids.map((i) => pins[i].id) });
+	}
+
+	// ---- Picking tacks ------------------------------------------------------
 
 	const tip = $('pin-tip');
-	const projected = new THREE.Vector3();
 	let hover = -1;
 	let selected = -1;
 
 	function pick(clientX, clientY) {
 		const rect = canvas.getBoundingClientRect();
-		const cam = camera.position;
 		let best = -1;
 		let bestD = 18 * 18;
 		for (let i = 0; i < n; i++) {
-			if (shown[i] < 0.5) continue;
-			const d = dirs[i];
-			if (d.x * cam.x + d.y * cam.y + d.z * cam.z <= 1.02) continue;
-			projected.copy(d).project(camera);
-			const x = rect.left + ((projected.x + 1) / 2) * rect.width;
-			const y = rect.top + ((1 - projected.y) / 2) * rect.height;
-			const dd = (x - clientX) ** 2 + (y - clientY) ** 2;
+			if (shown[i] < 0.5 || clustered[i] > 0.5) continue;
+			const s = screenOf(i, rect);
+			if (!s) continue;
+			const dd = (rect.left + s.x - clientX) ** 2 + (rect.top + s.y - clientY) ** 2;
 			if (dd < bestD) {
 				bestD = dd;
 				best = i;
@@ -303,7 +515,7 @@ mount('globe', function ({ THREE, scene, camera, renderer, canvas, colour, still
 		const i = pick(e.clientX, e.clientY);
 		canvas.style.cursor = i >= 0 ? 'pointer' : '';
 		if (i === hover) {
-			if (i >= 0) placeTip(e);
+			if (i >= 0) placeTip(e.clientX, e.clientY);
 			return;
 		}
 		hover = i;
@@ -313,8 +525,8 @@ mount('globe', function ({ THREE, scene, camera, renderer, canvas, colour, still
 		}
 		tip.textContent = pins[i].n + ' · ' + pins[i].p;
 		tip.hidden = false;
-		placeTip(e);
-		window.dispatchEvent(new CustomEvent('voyage:hover', { detail: { id: pins[i].id } }));
+		placeTip(e.clientX, e.clientY);
+		emit('voyage:hover', { id: pins[i].id });
 	});
 	canvas.addEventListener('pointerleave', () => (tip.hidden = true));
 	canvas.addEventListener('pointerup', function (e) {
@@ -323,17 +535,24 @@ mount('globe', function ({ THREE, scene, camera, renderer, canvas, colour, still
 		if (i >= 0) {
 			tip.hidden = true;
 			choose(i);
-			window.dispatchEvent(new CustomEvent('voyage:open', { detail: { id: pins[i].id } }));
+			emit('voyage:open', { id: pins[i].id });
 		}
 	});
 
-	function placeTip(e) {
+	function placeTip(x, y) {
 		const box = section.getBoundingClientRect();
-		tip.style.left = e.clientX - box.left + 14 + 'px';
-		tip.style.top = e.clientY - box.top + 14 + 'px';
+		tip.style.left = x - box.left + 14 + 'px';
+		tip.style.top = y - box.top + 14 + 'px';
 	}
 
-	function choose(i) {
+	function showTip(text, near) {
+		const r = near.getBoundingClientRect();
+		tip.textContent = text;
+		tip.hidden = false;
+		placeTip(r.right - 6, r.top + 2);
+	}
+
+	function choose(i, keepDistance) {
 		if (selected >= 0) hot[selected] = 0;
 		selected = i;
 		if (i >= 0) {
@@ -341,24 +560,93 @@ mount('globe', function ({ THREE, scene, camera, renderer, canvas, colour, still
 			shown[i] = 1;
 			guideOpen = true;
 			if (mode === 'playing') pause();
-			flyTo(dirs[i], Math.max(1.9, baseDistance * 0.68), 1.6);
+			const close = Math.max(1.35, baseDistance * 0.62);
+			flyTo(dirs[i], keepDistance ? Math.min(camera.position.length(), close) : close, 1.5);
 		}
 		pinsChanged();
 		render();
 	}
 
-	window.addEventListener('voyage:fly', function (e) {
-		const i = pins.findIndex((p) => p.id === e.detail.id);
-		if (i >= 0) choose(i);
+	on('voyage:fly', function (d) {
+		const i = byId.get(d.id);
+		if (i !== undefined) choose(i, d.keepDistance);
 	});
-	window.addEventListener('voyage:closed', function () {
+
+	on('voyage:closed', function () {
 		guideOpen = false;
 		if (selected >= 0) hot[selected] = 0;
 		selected = -1;
+		clearFocus();
 		pinsChanged();
 		flyTo(camera.position, baseDistance, 1.2);
 		clearTimeout(idleTimer);
 		idleTimer = setTimeout(resumeDrift, 4000);
+	});
+
+	// ---- Focus: a search lights its tacks and dims the rest ------------------
+
+	let focus = null;
+	let ring = null;
+
+	on('atlas:focus', function (d) {
+		if (mode === 'playing') pause();
+		guideOpen = true;
+		focus = new Set((d.ids || []).map((id) => byId.get(id)).filter((i) => i !== undefined));
+		drawCircle(d.circle);
+		applyVisibility();
+		if (d.circle) {
+			const spread = d.circle.km / 6371;
+			flyTo(toVec(THREE, d.circle.lat, d.circle.lng, 1), distanceFor(spread * 1.15), 1.6);
+		} else {
+			frame([...focus]);
+		}
+	});
+
+	function clearFocus() {
+		focus = null;
+		drawCircle(null);
+		applyVisibility();
+	}
+
+	// A dashed red-ink circle on the paper, round a city searched for.
+	function drawCircle(circle) {
+		if (ring) {
+			scene.remove(ring);
+			ring.geometry.dispose();
+			ring = null;
+		}
+		if (!circle) return render();
+		const a = circle.km / 6371;
+		const c = toVec(THREE, circle.lat, circle.lng, 1);
+		const u = new THREE.Vector3(0, 1, 0).cross(c);
+		if (u.lengthSq() < 1e-6) u.set(1, 0, 0);
+		u.normalize();
+		const v = c.clone().cross(u).normalize();
+		const points = [];
+		for (let k = 0; k <= 96; k++) {
+			const t = (k / 96) * Math.PI * 2;
+			points.push(
+				c.clone().multiplyScalar(Math.cos(a))
+					.addScaledVector(u, Math.sin(a) * Math.cos(t))
+					.addScaledVector(v, Math.sin(a) * Math.sin(t))
+					.multiplyScalar(1.003),
+			);
+		}
+		ring = new THREE.Line(
+			new THREE.BufferGeometry().setFromPoints(points),
+			new THREE.LineDashedMaterial({ color: red, dashSize: a * 0.12, gapSize: a * 0.07, transparent: true, opacity: 0.9 }),
+		);
+		ring.computeLineDistances();
+		scene.add(ring);
+		render();
+	}
+
+	// ---- Filters ------------------------------------------------------------
+
+	on('atlas:filter', function () {
+		rebuildActive();
+		applyVisibility();
+		drawBars($('voyage-bars'), active.map((i) => times[i]), tStart, tEnd);
 	});
 
 	// ---- The voyage ---------------------------------------------------------
@@ -378,21 +666,28 @@ mount('globe', function ({ THREE, scene, camera, renderer, canvas, colour, still
 	scrub.max = String(tEnd);
 	scrub.step = String(3600);
 	scrub.value = String(tEnd);
-	drawBars($('voyage-bars'), times, tStart, tEnd);
 
 	const dateFormat = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' });
 	let mode = 'explore';
 	let cur = tEnd;
-	let next = n;
+	let active = [];
+	let k = 0;
 	let speed = 1;
-	let tally = freshTally();
+	let count = freshTally();
 	let shownDay = '';
+
+	rebuildActive();
+	drawBars($('voyage-bars'), active.map((i) => times[i]), tStart, tEnd);
 
 	if (still) section.classList.add('voyage--still');
 
 	play.addEventListener('click', function () {
 		if (mode === 'playing') pause();
 		else start();
+	});
+	on('voyage:play', start);
+	on('voyage:pause', function () {
+		if (mode === 'playing') pause();
 	});
 	section.querySelectorAll('[data-speed]').forEach(function (btn) {
 		btn.addEventListener('click', function () {
@@ -407,15 +702,23 @@ mount('globe', function ({ THREE, scene, camera, renderer, canvas, colour, still
 		seek(Number(scrub.value));
 	});
 
+	// The sightings the voyage plays: those the filters let through, oldest first.
+	function rebuildActive() {
+		active = [];
+		for (let i = 0; i < n; i++) if (passes(i)) active.push(i);
+	}
+
 	function start() {
 		if (!n || still) return;
+		if (focus || guideOpen) emit('atlas:clear');
 		if (mode === 'explore' || cur >= tEnd) seek(tStart);
 		play.classList.remove('seal--nudge');
 		mode = 'playing';
 		section.classList.add('voyage--playing');
 		play.setAttribute('aria-label', 'Pause the voyage');
 		controls.autoRotate = !follow.checked;
-		window.dispatchEvent(new CustomEvent('voyage:playing'));
+		clustersDirty = true;
+		emit('voyage:playing');
 	}
 
 	function pause() {
@@ -423,6 +726,7 @@ mount('globe', function ({ THREE, scene, camera, renderer, canvas, colour, still
 		section.classList.remove('voyage--playing');
 		play.setAttribute('aria-label', 'Play the voyage');
 		updateReadout(true);
+		clustersDirty = true;
 	}
 
 	function finish() {
@@ -432,32 +736,41 @@ mount('globe', function ({ THREE, scene, camera, renderer, canvas, colour, still
 		play.setAttribute('aria-label', 'Play the voyage again');
 		scrub.value = String(tEnd);
 		updateReadout(true);
+		clustersDirty = true;
 		clearTimeout(idleTimer);
 		idleTimer = setTimeout(resumeDrift, 2500);
 	}
 
-	// Jumps the voyage to a moment: everything seen by then is on the globe, quietly.
-	function seek(t) {
-		cur = t;
-		tally = freshTally();
-		next = 0;
+	// Shows what's been seen by the voyage's date, filtered, and lit or dimmed by a search.
+	function applyVisibility() {
 		for (let i = 0; i < n; i++) {
-			const seen = times[i] <= t;
-			shown[i] = seen || i === selected ? 1 : 0;
-			arrived[i] = -100;
-			if (seen) {
-				addToTally(i);
-				next = i + 1;
-			}
+			const inFocus = focus ? focus.has(i) : false;
+			const seen = times[i] <= cur;
+			shown[i] = (seen && (passes(i) || inFocus)) || i === selected ? 1 : 0;
+			dim[i] = focus && !inFocus ? 1 : 0;
 		}
-		for (const s of pool) s.visible = false;
+		count = freshTally();
+		k = 0;
+		for (const i of active) {
+			if (times[i] > cur) break;
+			addToTally(i);
+			k++;
+		}
 		pinsChanged();
 		updateReadout(true);
 		render();
 	}
 
+	// Jumps the voyage to a moment: everything seen by then is on the globe, quietly.
+	function seek(t) {
+		cur = t;
+		arrived.fill(-100);
+		for (const s of pool) s.visible = false;
+		applyVisibility();
+	}
+
 	function advance(dt) {
-		if (next >= n) {
+		if (k >= active.length) {
 			if (cur >= tEnd) return finish();
 			cur = Math.min(cur + 120 * DAY * dt, tEnd);
 			return;
@@ -466,15 +779,17 @@ mount('globe', function ({ THREE, scene, camera, renderer, canvas, colour, still
 		// when sightings bunch up, so nothing waits long and nothing piles up.
 		let rate = 45 * DAY * speed;
 		const maxWait = 0.55 / speed;
-		const gap = times[next] - cur;
+		const gap = times[active[k]] - cur;
 		if (gap / rate > maxWait) rate = gap / maxWait;
 		const cap = 4 * speed;
-		if (next + cap < n && times[next + cap] - cur < rate) rate = Math.max(times[next + cap] - cur, 3600);
+		if (k + cap < active.length && times[active[k + cap]] - cur < rate) {
+			rate = Math.max(times[active[k + cap]] - cur, 3600);
+		}
 		cur += rate * Math.min(dt, 0.1);
 		let landed = 0;
-		while (next < n && times[next] <= cur) {
-			arrive(next);
-			next++;
+		while (k < active.length && times[active[k]] <= cur) {
+			arrive(active[k]);
+			k++;
 			landed++;
 		}
 		if (landed) pinsChanged();
@@ -490,11 +805,11 @@ mount('globe', function ({ THREE, scene, camera, renderer, canvas, colour, still
 			recent.push(dirs[i]);
 			if (recent.length > 5) recent.shift();
 			const aim = new THREE.Vector3();
-			recent.forEach((d, k) => aim.addScaledVector(d, k + 1));
+			recent.forEach((d, j) => aim.addScaledVector(d, j + 1));
 			if (aim.lengthSq() < 1e-6) return;
 			aim.normalize();
 			const facing = aim.dot(camera.position.clone().normalize());
-			if (facing < 0.82 && clock - lastTween > 1.3) flyTo(aim, baseDistance, 1.5);
+			if (facing < 0.82 && clock - lastTween > 1.3) flyTo(aim, Math.max(camera.position.length(), baseDistance * 0.85), 1.5);
 		}
 	}
 
@@ -503,10 +818,10 @@ mount('globe', function ({ THREE, scene, camera, renderer, canvas, colour, still
 	}
 
 	function addToTally(i) {
-		tally.sightings++;
-		tally.animals.add(pins[i].s);
-		if (pins[i].c) tally.countries.add(pins[i].c);
-		if (pins[i].w === 'storm') tally.storms++;
+		count.sightings++;
+		count.animals.add(pins[i].s);
+		if (pins[i].c) count.countries.add(pins[i].c);
+		if (pins[i].w === 'storm') count.storms++;
 	}
 
 	function updateReadout(force) {
@@ -516,10 +831,10 @@ mount('globe', function ({ THREE, scene, camera, renderer, canvas, colour, still
 		dateOut.textContent = day;
 		scrub.value = String(Math.round(cur));
 		scrub.setAttribute('aria-valuetext', day);
-		counts.sightings.textContent = tally.sightings;
-		counts.animals.textContent = tally.animals.size;
-		counts.countries.textContent = tally.countries.size;
-		counts.storms.textContent = tally.storms;
+		counts.sightings.textContent = count.sightings;
+		counts.animals.textContent = count.animals.size;
+		counts.countries.textContent = count.countries.size;
+		counts.storms.textContent = count.storms;
 	}
 
 	// ---- Every frame --------------------------------------------------------
@@ -529,6 +844,7 @@ mount('globe', function ({ THREE, scene, camera, renderer, canvas, colour, still
 	function render() {
 		if (still) {
 			sizeRing();
+			gatherClusters();
 			renderer.render(scene, camera);
 		}
 	}
@@ -537,7 +853,8 @@ mount('globe', function ({ THREE, scene, camera, renderer, canvas, colour, still
 		const wasBase = Math.abs(camera.position.length() - baseDistance) < 0.05;
 		baseDistance = fitDistance(stage.clientWidth / Math.max(stage.clientHeight, 1));
 		if (wasBase && !tween) camera.position.setLength(baseDistance);
-		pinMaterial.uniforms.uSize.value = 30 * renderer.getPixelRatio();
+		pinMaterial.uniforms.uSize.value = 15 * renderer.getPixelRatio();
+		clustersDirty = true;
 		render();
 	}).observe(stage);
 
@@ -555,22 +872,14 @@ mount('globe', function ({ THREE, scene, camera, renderer, canvas, colour, still
 		}
 		stepTween();
 		if (!tween) controls.update();
+		gearControls();
 		animateWeather(time);
 		sizeRing();
+		gatherClusters();
 	};
 });
 
 // ---- Helpers ----------------------------------------------------------------
-
-function readPins() {
-	try {
-		const el = document.getElementById('voyage-pins');
-		const all = el ? JSON.parse(el.textContent) : [];
-		return Array.isArray(all) ? all.filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lng)) : [];
-	} catch {
-		return [];
-	}
-}
 
 // Latitude and longitude to a point on a sphere, matching three.js's sphere UVs.
 function toVec(THREE, lat, lng, r) {

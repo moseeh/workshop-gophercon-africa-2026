@@ -47,6 +47,20 @@ Logbook (every sighting as a ledger row) below it. "Field Atlas" is a working na
   and inked weather symbols matching the globe's washes. Open on wide screens, folded to a
   "❦ Legend" pill below 1100px, and the visitor's choice is remembered in `localStorage`. It fades
   while the voyage plays. The wax seal pulses five times until the visitor plays or drags.
+- **Zoom and clusters**: tacks stay a fixed size on screen and the camera comes down to 1.06
+  (soft, painterly coastlines up close, by choice). Tacks closer than ~26px gather under a
+  numbered red wax seal, and seals closer than 36px merge, recomputed when the camera moves. Off while
+  the voyage plays. Tapping a seal opens its list.
+- **Animal groups** (`species.Species.Group()`, `internal/domain/species/group.go`): family →
+  everyday group, with genus exceptions (orca → Whales, wildebeest/buffalo split from antelope).
+  The cartouche's **Animals** tab filters by group and by "✎ With notes". Filters also shape the
+  voyage, its counters and timeline bars. Tacks with notes have a gilded rim.
+- **Search** (`web/assets/js/search.js`): continents (`country.Code.Continent()`), countries,
+  regions (spellings merged), animal groups (species names find their group) and cities
+  (`web/assets/js/cities.js`, within 100 km, drawn as a dashed red-ink circle). All in the browser.
+- **Panel stack** (`web/assets/js/guide.js`): place, group or cluster page (ink-stroke bars,
+  usual sky, notes count, sightings by group) → field guide with "← back" and "Next →".
+  Escape steps back, then closes.
 - **Logbook**: a ruled parchment page and a table, stacked cards on phones. "Show on globe" flies to
   the pin and opens its page.
 
