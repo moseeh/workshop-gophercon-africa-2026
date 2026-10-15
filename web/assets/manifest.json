@@ -1,0 +1,8 @@
+{
+	"name": "Field Atlas",
+	"short_name": "Field Atlas",
+	"icons": [{ "src": "/assets/images/logo.svg", "sizes": "any", "type": "image/svg+xml" }],
+	"theme_color": "#2A1E14",
+	"background_color": "#2A1E14",
+	"display": "standalone"
+}

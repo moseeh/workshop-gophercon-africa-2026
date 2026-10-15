@@ -1,0 +1,59 @@
+package components
+
+import "workshop/internal/domain/sighting"
+
+templ FieldGuide(s sighting.Sighting) {
+	<article class="guide" aria-labelledby="guide-title">
+		<header class="guide__head">
+			if k := lineage(s); k != "" {
+				<p class="guide__kicker">{ k }</p>
+			}
+			<h2 id="guide-title" class="guide__title">{ DisplayName(s) }</h2>
+			if s.Species.ScientificName != "" && s.Species.ScientificName != DisplayName(s) {
+				<p class="guide__sci">{ s.Species.ScientificName }</p>
+			}
+		</header>
+		if photos := stills(s.Media); len(photos) > 0 {
+			<figure class="guide__plate">
+				<img src={ photoURL(photos[0].URL) } alt={ photoAlt(s, photos[0]) } decoding="async"/>
+				if credit := photoCredit(photos[0]); credit != "" {
+					<figcaption>{ credit }</figcaption>
+				}
+			</figure>
+			if len(photos) > 1 {
+				<ul class="guide__more" aria-label="More photos">
+					for _, m := range photos[1:] {
+						<li><img src={ photoURL(m.URL) } alt={ photoAlt(s, m) } loading="lazy" decoding="async"/></li>
+					}
+				</ul>
+			}
+		} else {
+			<p class="guide__noplate">No plate was made of this one.</p>
+		}
+		if s.Remarks != "" {
+			<blockquote class="guide__note">
+				<p>{ s.Remarks }</p>
+			</blockquote>
+		}
+		<dl class="guide__facts">
+			<dt>Seen</dt>
+			<dd><time datetime={ s.HappenedAt.UTC().Format("2006-01-02T15:04Z") }>{ Seen(s) }</time></dd>
+			<dt>Where</dt>
+			<dd>{ Place(s.Location) }</dd>
+			if s.IndividualCount != nil {
+				<dt>Count</dt>
+				<dd>{ individuals(*s.IndividualCount) }</dd>
+			}
+			<dt>Recorded by</dt>
+			<dd>{ Observer(s) }</dd>
+			<dt>Conditions</dt>
+			<dd>
+				@Weather(s.Weather)
+				<small class="guide__estimate">Estimated for that hour</small>
+			</dd>
+		</dl>
+		if s.ReferenceURL != "" {
+			<a class="guide__source" href={ templ.URL(s.ReferenceURL) } target="_blank" rel="noopener">See the original record</a>
+		}
+	</article>
+}

@@ -1,8 +1,13 @@
 package layout
 
+import "workshop/web/views/components"
+
 type BaseProps struct {
-	Title string
+	Title       string
+	Description string
 }
+
+const SiteName = "Field Atlas"
 
 templ Base(props BaseProps) {
 	<!DOCTYPE html>
@@ -10,14 +15,47 @@ templ Base(props BaseProps) {
 		<head>
 			<meta charset="utf-8"/>
 			<meta name="viewport" content="width=device-width, initial-scale=1"/>
+			<link rel="icon" href="/assets/images/logo.svg" type="image/svg+xml"/>
+			<link rel="manifest" href="/assets/manifest.json"/>
+			<meta name="theme-color" content="#2A1E14"/>
 			<title>{ props.Title }</title>
+			if props.Description != "" {
+				<meta name="description" content={ props.Description }/>
+			}
+			<link rel="preconnect" href="https://fonts.googleapis.com"/>
+			<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+			<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Caveat:wght@500;600&family=IM+Fell+English:ital@0;1&family=Merriweather:ital,wght@0,400;0,700;1,400&display=swap"/>
+			<script type="importmap">
+				{
+					"imports": {
+						"three": "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.module.js",
+						"three/addons/": "https://cdn.jsdelivr.net/npm/three@0.186.1/examples/jsm/",
+						"d3-geo": "https://cdn.jsdelivr.net/npm/d3-geo@3.1.1/+esm",
+						"topojson-client": "https://cdn.jsdelivr.net/npm/topojson-client@3.1.0/+esm"
+					}
+				}
+			</script>
+			<link rel="stylesheet" href="/assets/css/threejs.css"/>
+			<link rel="stylesheet" href="/assets/css/weather.css"/>
 			<link rel="stylesheet" href="/assets/css/app.css"/>
 		</head>
 		<body>
-			<main class="container">
+			@components.WeatherIcons()
+			<a class="skip" href="#logbook">Skip to the logbook</a>
+			<header class="masthead">
+				<a class="masthead__brand" href="/">
+					<img src="/assets/images/logo.svg" alt="" width="44" height="44"/>
+					<span>{ SiteName }</span>
+				</a>
+				<nav class="masthead__nav" aria-label="Main">
+					<a href="/#globe">Globe</a>
+					<a href="/#logbook">Logbook</a>
+				</nav>
+			</header>
+			<main id="top">
 				{ children... }
 			</main>
-			<script src="/assets/js/app.js"></script>
+			<script type="module" src="/assets/js/app.js"></script>
 		</body>
 	</html>
 }

@@ -1,27 +1,120 @@
 package pages
 
 import (
+	"strconv"
 	"workshop/internal/domain/sighting"
 	"workshop/web/views/components"
 	"workshop/web/views/layout"
 )
 
 templ Home(sightings []sighting.Sighting) {
+	{{ sum := sighting.Summarise(sightings) }}
 	@layout.Base(layout.BaseProps{
-		Title: "Sightings",
+		Title:       layout.SiteName + " · a voyage through wildlife sightings",
+		Description: "Wildlife sightings from around the world on an antique globe, played back through time with the weather they were seen in.",
 	}) {
-		<h1>Sightings</h1>
-		if len(sightings) == 0 {
-			<p>No sightings have been ingested yet.</p>
-		} else {
-			<p>Total: { len(sightings) }</p>
-			<ul class="sightings">
-				for _, s := range sightings {
-					<li>
-						@components.SightingCard(s)
-					</li>
-				}
-			</ul>
-		}
+		<section id="globe" class="voyage" aria-label="Globe of sightings">
+			<div class="voyage__stage">
+				<div class="voyage__ring" aria-hidden="true"></div>
+				@components.ThreeScene(components.ThreeSceneProps{
+					Scene: "globe",
+					Label: "An antique globe with a pin for each sighting. Every sighting is also listed in the logbook below.",
+				})
+			</div>
+			<dl class="ledger" aria-label="Voyage so far">
+				<div><dt>Sightings</dt><dd data-count="sightings">{ strconv.Itoa(sum.Sightings) }</dd></div>
+				<div><dt>Animals</dt><dd data-count="animals">{ strconv.Itoa(sum.Species) }</dd></div>
+				<div><dt>Countries</dt><dd data-count="countries">{ strconv.Itoa(sum.Countries) }</dd></div>
+				<div><dt>Storms</dt><dd data-count="storms">{ strconv.Itoa(storms(sightings)) }</dd></div>
+			</dl>
+			<p class="voyage__hint">Drag to turn the globe · tap a pin to open its page</p>
+			<div class="voyage__deck">
+				<button type="button" class="seal" id="voyage-play" aria-label="Play the voyage">
+					<svg class="seal__play" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z"></path></svg>
+					<svg class="seal__pause" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5h4v14H7zM13 5h4v14h-4z"></path></svg>
+				</button>
+				<div class="voyage__time">
+					<p class="voyage__date" id="voyage-date" aria-live="off">{ yearSpan(sum) }</p>
+					<div class="voyage__track">
+						<div class="voyage__bars" id="voyage-bars" aria-hidden="true"></div>
+						<input type="range" id="voyage-scrub" aria-label="Voyage date" min="0" max="1" step="1" value="1"/>
+					</div>
+					<div class="voyage__ends" aria-hidden="true">
+						<span>{ year(sum.Earliest) }</span>
+						<span>{ year(sum.Latest) }</span>
+					</div>
+				</div>
+				<div class="voyage__options">
+					<div class="speed" role="group" aria-label="Speed">
+						<button type="button" data-speed="1" aria-pressed="true">1×</button>
+						<button type="button" data-speed="2" aria-pressed="false">2×</button>
+						<button type="button" data-speed="4" aria-pressed="false">4×</button>
+					</div>
+					<label class="follow">
+						<input type="checkbox" id="voyage-follow" checked/>
+						<span>Follow the voyage</span>
+					</label>
+				</div>
+			</div>
+			<aside class="guide-panel" id="guide-panel" tabindex="-1" aria-label="Field guide" hidden>
+				<button type="button" class="guide-panel__close" id="guide-close" aria-label="Close the field guide">×</button>
+				<div id="guide-body" aria-live="polite"></div>
+			</aside>
+			<p class="pin-tip" id="pin-tip" hidden></p>
+		</section>
+		<section id="logbook" class="logbook" aria-labelledby="logbook-title">
+			<header class="logbook__head">
+				<h1 id="logbook-title">The Logbook</h1>
+				<p>Every sighting on the globe, newest first, as it was written down.</p>
+			</header>
+			if len(sightings) == 0 {
+				<p class="logbook__empty">The logbook is empty: no sightings have been recorded yet.</p>
+			} else {
+				<table class="logbook__table">
+					<thead>
+						<tr>
+							<th scope="col">Seen</th>
+							<th scope="col">Animal</th>
+							<th scope="col">Where</th>
+							<th scope="col">Recorded by</th>
+							<th scope="col">Conditions</th>
+							<th scope="col"><span class="visually-hidden">On the globe</span></th>
+						</tr>
+					</thead>
+					<tbody>
+						for _, s := range sightings {
+							<tr>
+								<td data-label="Seen"><time datetime={ s.HappenedAt.UTC().Format("2006-01-02") }>{ components.Seen(s) }</time></td>
+								<td data-label="Animal">
+									<span class="logbook__name">{ components.DisplayName(s) }</span>
+									if s.Species.ScientificName != "" {
+										<span class="logbook__sci">{ s.Species.ScientificName }</span>
+									}
+								</td>
+								<td data-label="Where">{ components.Place(s.Location) }</td>
+								<td data-label="Recorded by">{ components.Observer(s) }</td>
+								<td data-label="Conditions">
+									if sk := components.Sky(s); sk != "" {
+										<span class="logbook__sky">
+											<svg class="weather__icon" aria-hidden="true"><use href={ templ.URL("#wx-" + sk) }></use></svg>
+											{ s.Weather.Condition.Description }
+										</span>
+									} else {
+										<span class="logbook__sky">Not recorded</span>
+									}
+								</td>
+								<td>
+									<button type="button" class="logbook__go" data-sighting={ s.ID.String() }>
+										Show on globe<span class="visually-hidden">: { components.DisplayName(s) }</span>
+									</button>
+								</td>
+							</tr>
+						}
+					</tbody>
+				</table>
+			}
+		</section>
+		@templ.JSONScript("voyage-pins", components.Pins(sightings))
+		<script type="module" src="/assets/js/guide.js"></script>
 	}
 }
